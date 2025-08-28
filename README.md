@@ -23,6 +23,8 @@ python code/app.py
 
 Open your browser at: [http://localhost:8050](http://localhost:8050)
 
+You can create your own environment. 
+
 ---
 
 ## 🐳 Run with Docker (recommended)
