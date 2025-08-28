@@ -1,6 +1,6 @@
 # Car Price Prediction
 
-This project predicts the selling price of used cars based on features like year, kilometers driven, engine size, mileage, max power, seats, fuel type, seller type, transmission, and car name.
+This project predicts the selling price of cars from the Chaky Company based on features like year, kilometers driven, engine size, mileage, max power, seats, fuel type, seller type, transmission, and car name.
 
 The workflow:
 1. Clean the dataset (remove outliers, handle missing values).
