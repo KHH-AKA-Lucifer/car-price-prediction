@@ -64,7 +64,3 @@ car-price-prediction/
 - Prices are predicted on the original scale (target was log-transformed during training).  
 - Missing values are filled with median (numeric) or most frequent (categorical).  
 - You can try any car name; unseen names are simply ignored by the encoder.
-
----
-
-👉 That’s it! Simple: clean data, train model, predict prices in a web app.
