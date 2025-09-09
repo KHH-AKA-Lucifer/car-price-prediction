@@ -1,6 +1,6 @@
 # Car Price Prediction
 
-This project predicts the selling price of used cars based on features like year, kilometers driven, engine size, mileage, max power, seats, fuel type, seller type, transmission, and car name.
+This project predicts the selling price of cars from the Chaky Company based on features like year, kilometers driven, engine size, mileage, max power, seats, fuel type, seller type, transmission, and car name.
 
 The workflow:
 1. Clean the dataset (remove outliers, handle missing values).
@@ -22,6 +22,8 @@ python code/app.py
 ```
 
 Open your browser at: [http://localhost:8050](http://localhost:8050)
+
+You can create your own environment. 
 
 ---
 
@@ -64,7 +66,3 @@ car-price-prediction/
 - Prices are predicted on the original scale (target was log-transformed during training).  
 - Missing values are filled with median (numeric) or most frequent (categorical).  
 - You can try any car name; unseen names are simply ignored by the encoder.
-
----
-
-👉 That’s it! Simple: clean data, train model, predict prices in a web app.
