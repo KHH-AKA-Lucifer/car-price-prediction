@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/kaungheinhtet/Desktop/ML/car-price-prediction/mlruns/0/4a4b7ed386004cbf89a6a7b3d2599411/artifacts
+end_time: 1757462907939
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 4a4b7ed386004cbf89a6a7b3d2599411
+run_name: Ridge_28
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1757462881458
+status: 3
+tags: []
+user_id: kaungheinhtet
