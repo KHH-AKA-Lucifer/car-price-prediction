@@ -1,0 +1,19 @@
+{
+  "reg": "Lasso",
+  "poly_deg": 1,
+  "params": {
+    "method": "batch",
+    "lr": 0.0001,
+    "l": 0.0001,
+    "init": "xavier",
+    "use_momentum": true,
+    "momentum": 0.9,
+    "num_epochs": 100,
+    "batch_size": 50
+  },
+  "cv_r2": -43515.11250887193,
+  "cv_mse": 2.7586837854063444e+16,
+  "test_r2": -33262.368854107335,
+  "test_mse": 2.2228977812854436e+16,
+  "timestamp": "2025-09-12 14:34:55"
+}
