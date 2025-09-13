@@ -1,23 +1,7 @@
-from LinearRegression import LassoPenalty, RidgePenalty
-
-def _unwrap_estimator(obj):
-    """Return something with .predict(...) from common artifact shapes."""
-    # Already a usable estimator/pipeline
-    if hasattr(obj, "predict"):
-        return obj
-    # GridSearchCV: use best_estimator_
-    if hasattr(obj, "best_estimator_"):
-        return obj.best_estimator_
-    # Dict packs: try common keys
-    if isinstance(obj, dict):
-        for k in ("pipeline", "model", "estimator"):
-            if k in obj and hasattr(obj[k], "predict"):
-                return obj[k]
-    raise TypeError("Loaded artifact does not contain a predict-able estimator")
-
 import sys
 import joblib
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from dash import Dash, html, dcc, Input, Output, State
 
@@ -50,6 +34,54 @@ def load_models():
 
 MODEL_OLD, MODEL_NEW = load_models()
 
+# Columns V2 used during training (order matters only a little, but keep it consistent)
+V2_FEATURES = [
+    "year", "km_driven", "mileage", "engine", "max_power", "seats",
+    "fuel", "seller_type", "transmission", "owner",
+]
+
+
+def encode_v2_categories(df: pd.DataFrame) -> pd.DataFrame:
+    """Replicate LabelEncoder behavior used in V2 training."""
+    # LabelEncoder maps classes in sorted order.
+    # Based on your dataset/choices this is deterministic:
+    fuel_map = {"Diesel": 0, "Petrol": 1}
+    seller_map = {"Dealer": 0, "Individual": 1, "Trustmark Dealer": 2}
+    trans_map = {"Automatic": 0, "Manual": 1}
+
+    if "fuel" in df:
+        df["fuel"] = df["fuel"].map(fuel_map).astype(float)
+    if "seller_type" in df:
+        df["seller_type"] = df["seller_type"].map(seller_map).astype(float)
+    if "transmission" in df:
+        df["transmission"] = df["transmission"].map(trans_map).astype(float)
+
+    # You label-encoded owner after converting to str; sorted(['1','2','3','4']) -> 0..3
+    # So owner_numerical_code = int(owner) - 1
+    if "owner" in df and pd.notna(df["owner"].iloc[0]):
+        try:
+            df["owner"] = (pd.to_numeric(df["owner"], errors="coerce") - 1).astype(float)
+        except Exception:
+            df["owner"] = np.nan
+
+    return df
+
+def prepare_v2_input(input_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop fields V2 didn't use (like 'name') and align to the exact feature set.
+    Unknown columns are dropped; missing ones are added as NaN (imputers/scaler will handle).
+    """
+    # Drop any columns V2 didn't train on (e.g., 'name')
+    input_df = input_df[[c for c in input_df.columns if c in V2_FEATURES]].copy()
+
+    # Ensure all expected columns exist and in the right order
+    input_df = input_df.reindex(columns=V2_FEATURES)
+
+    # Coerce empty strings to NaN so imputers can work (if you have them)
+    input_df.replace({"": np.nan}, inplace=True)
+
+    return input_df
+
 
 # If your model was trained on log(y) and predicts log-prices, set this True.
 USE_LOG_TARGET = False
@@ -63,25 +95,25 @@ app = Dash(__name__, suppress_callback_exceptions=True, title="Car Price Predict
 server = app.server  # for Docker/Gunicorn if needed
 
 def build_row(values: dict) -> pd.DataFrame:
-    """
-    Build a single-row DataFrame that matches your training schema.
-    IMPORTANT:
-      - If your saved MODEL is a Pipeline (with OneHotEncoder on 'name', etc.), just pass raw fields.
-      - If your saved MODEL is a bare estimator trained on pre-encoded columns, you MUST replicate the encoding here.
-    """
-    row = {
-        'name'        : values.get('name') or None,
-        'year'        : values.get('year'),
-        'km_driven'   : values.get('km'),
-        'owner'       : values.get('owner'),
-        'mileage'     : values.get('mileage'),
-        'engine'      : values.get('engine'),
-        'max_power'   : values.get('power'),
-        'seats'       : values.get('seats'),
-        'fuel'        : values.get('fuel'),
-        'seller_type' : values.get('seller'),
-        'transmission': values.get('trans'),
+    # map form keys -> model feature names
+    key_to_col = {
+        "name": "name",
+        "year": "year",
+        "km": "km_driven",
+        "owner": "owner",
+        "mileage": "mileage",
+        "engine": "engine",
+        "power": "max_power",
+        "seats": "seats",
+        "fuel": "fuel",
+        "seller": "seller_type",
+        "trans": "transmission",
     }
+    row = {}
+    for k, v in values.items():
+        col = key_to_col.get(k)
+        if col and v not in (None, ""):
+            row[col] = v
     return pd.DataFrame([row])
 
 # -----------------------------
@@ -104,44 +136,35 @@ def navbar():
         style={"padding": "10px 16px", "background": "#111", "position": "sticky", "top": 0, "zIndex": 999},
     )
 
-def form_block(prefix: str):
-    # prefix ensures unique IDs on /old vs /new
-    return html.Div(style={"maxWidth": "900px", "margin": "40px auto"}, children=[
-        html.H2("Car Price Prediction"),
-        html.P("Enter what you know; missing fields are fine — the model imputes them if the Pipeline includes Imputers."),
+def form_block(prefix: str, include_name: bool = True):
+    grid = []
 
-        html.Div(style={"display":"grid", "gridTemplateColumns":"1fr 1fr", "gap":"12px"}, children=[
+    if include_name:
+        grid += [
             html.Label("Car Name (full model name)"),
             dcc.Input(id=f"{prefix}name", type="text", placeholder="e.g., Maruti Swift VDI"),
+        ]
 
-            html.Label("Year"),
-            dcc.Input(id=f"{prefix}year", type="number", placeholder="e.g., 2016"),
+    grid += [
+        html.Label("Year"),              dcc.Input(id=f"{prefix}year", type="number", placeholder="e.g., 2016"),
+        html.Label("KM Driven"),         dcc.Input(id=f"{prefix}km", type="number", placeholder="e.g., 65000"),
+        html.Label("Owner (1=First, 2=Second, 3=Third, 4=Fourth+)"),
+                                         dcc.Input(id=f"{prefix}owner", type="number", min=1, max=4, placeholder="1–4"),
+        html.Label("Mileage (kmpl)"),    dcc.Input(id=f"{prefix}mileage", type="number", step="any", placeholder="e.g., 18.5"),
+        html.Label("Engine (CC)"),       dcc.Input(id=f"{prefix}engine", type="number", step="any", placeholder="e.g., 1498"),
+        html.Label("Max Power (bhp)"),   dcc.Input(id=f"{prefix}power", type="number", step="any", placeholder="e.g., 98.6"),
+        html.Label("Seats"),             dcc.Input(id=f"{prefix}seats", type="number", placeholder="e.g., 5"),
+    ]
 
-            html.Label("KM Driven"),
-            dcc.Input(id=f"{prefix}km", type="number", placeholder="e.g., 65000"),
-
-            html.Label("Owner (1=First, 2=Second, 3=Third, 4=Fourth+)"),
-            dcc.Input(id=f"{prefix}owner", type="number", min=1, max=4, placeholder="1–4"),
-
-            html.Label("Mileage (kmpl)"),
-            dcc.Input(id=f"{prefix}mileage", type="number", step="any", placeholder="e.g., 18.5"),
-
-            html.Label("Engine (CC)"),
-            dcc.Input(id=f"{prefix}engine", type="number", step="any", placeholder="e.g., 1498"),
-
-            html.Label("Max Power (bhp)"),
-            dcc.Input(id=f"{prefix}power", type="number", step="any", placeholder="e.g., 98.6"),
-
-            html.Label("Seats"),
-            dcc.Input(id=f"{prefix}seats", type="number", placeholder="e.g., 5"),
-        ]),
-
-        html.Div(style={"display":"grid", "gridTemplateColumns":"1fr 1fr 1fr", "gap":"12px", "marginTop":"12px"}, children=[
+    return html.Div(style={"maxWidth":"900px","margin":"40px auto"}, children=[
+        html.H2("Car Price Prediction"),
+        html.P("Please, enter details below and click Predict Price. Missing out something will not give you the price."),
+        html.Div(style={"display":"grid","gridTemplateColumns":"1fr 1fr","gap":"12px"}, children=grid),
+        html.Div(style={"display":"grid","gridTemplateColumns":"1fr 1fr 1fr","gap":"12px","marginTop":"12px"}, children=[
             html.Div([html.Label("Fuel"), dcc.Dropdown(FUEL_OPTS, id=f"{prefix}fuel", placeholder="Select fuel")]),
             html.Div([html.Label("Seller Type"), dcc.Dropdown(SELLER_OPTS, id=f"{prefix}seller", placeholder="Select seller")]),
             html.Div([html.Label("Transmission"), dcc.Dropdown(TRANS_OPTS, id=f"{prefix}trans", placeholder="Select transmission")]),
         ]),
-
         html.Button("Predict Price", id=f"{prefix}go", n_clicks=0, style={"marginTop":"16px"}),
         html.H3(id=f"{prefix}out", style={"marginTop":"16px"}),
         html.Pre(id=f"{prefix}dbg", style={"opacity":0.6}),
@@ -187,7 +210,7 @@ def home_page():
     )
 
 def old_page():
-    return form_block("old-")
+    return form_block("old-", include_name=True)
 
 def new_page():
     return html.Div([
@@ -201,7 +224,7 @@ def new_page():
                 "This model may have a different pipeline than the old model but with advanced model, but the input fields are the same.\n\n"
             ),
         ]),
-        form_block("new-")
+        form_block("new-", include_name=False)
     ])
 
 # -------------
@@ -246,14 +269,14 @@ def predict_old(_, name, year, km, owner, mileage, engine, power, seats, fuel, s
         X = build_row({
             "name": name, "year": year, "km": km, "owner": owner,
             "mileage": mileage, "engine": engine, "power": power, "seats": seats,
-            "fuel": fuel, "seller": seller, "trans": trans
+            "fuel": fuel, "seller": seller, "trans": trans, "owner": owner
         })
         y_pred = MODEL_OLD.predict(X)
         if USE_LOG_TARGET:
             import numpy as np
             y_pred = np.exp(y_pred)
         pred_val = float(y_pred[0])
-        return f"Estimated selling price: {pred_val:,.0f}", X.to_json(orient="records", indent=2)
+        return f"Estimated selling price: ₹ {pred_val:,.0f}", X.to_json(orient="records", indent=2)
     except Exception as e:
         return "Prediction failed. Please review inputs.", f"Error: {e}"
 
@@ -261,10 +284,8 @@ def predict_old(_, name, year, km, owner, mileage, engine, power, seats, fuel, s
     Output("new-out", "children"),
     Output("new-dbg", "children"),
     Input("new-go", "n_clicks"),
-    State("new-name","value"),
     State("new-year","value"),
     State("new-km","value"),
-    State("new-owner","value"),
     State("new-mileage","value"),
     State("new-engine","value"),
     State("new-power","value"),
@@ -272,21 +293,25 @@ def predict_old(_, name, year, km, owner, mileage, engine, power, seats, fuel, s
     State("new-fuel","value"),
     State("new-seller","value"),
     State("new-trans","value"),
+    State("new-owner","value"),
     prevent_initial_call=True
 )
-def predict_new(_, name, year, km, owner, mileage, engine, power, seats, fuel, seller, trans):
+def predict_new(_, year, km, mileage, engine, power, seats, fuel, seller, trans, owner):
     try:
         X = build_row({
-            "name": name, "year": year, "km": km, "owner": owner,
+            "year": year, "km": km,
             "mileage": mileage, "engine": engine, "power": power, "seats": seats,
-            "fuel": fuel, "seller": seller, "trans": trans
+            "fuel": fuel, "seller": seller, "trans": trans, "owner": owner
         })
+        # print("V2 Columns:", list(X.columns))
+        X = prepare_v2_input(X)  # Align to V2 features if needed
+        X = encode_v2_categories(X)  # Replicate LabelEncoder behavior
         y_pred = MODEL_NEW.predict(X)
         if USE_LOG_TARGET:
             import numpy as np
             y_pred = np.exp(y_pred)
         pred_val = float(y_pred[0])
-        return f"Estimated selling price: {pred_val:,.0f}", X.to_json(orient="records", indent=2)
+        return f"Estimated selling price: ₹ {pred_val:,.0f}", X.to_json(orient="records", indent=2)
     except Exception as e:
         return "Prediction failed. Please review inputs.", f"Error: {e}"
 
